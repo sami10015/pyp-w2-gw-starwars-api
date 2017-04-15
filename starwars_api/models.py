@@ -11,7 +11,8 @@ class BaseModel(object):
         Dynamically assign all attributes in `json_data` as instance
         attributes of the Model.
         """
-        pass
+        for key, value in json_data.items():
+            setattr(self, key, value)
 
     @classmethod
     def get(cls, resource_id):
@@ -19,7 +20,15 @@ class BaseModel(object):
         Returns an object of current Model requesting data to SWAPI using
         the api_client.
         """
-        pass
+        #Depending on the instances resource name, this will return either get_people, or get_films, both API calls
+        method_name = 'get_{}'.format(cls.RESOURCE_NAME)
+        #Turn this string into a method using getattr
+        method = getattr(api_client, method_name)
+        #Get the corresponding JSON data
+        json_data = method(resource_id)
+        #Return it
+        return cls(json_data)
+        
 
     @classmethod
     def all(cls):
@@ -28,7 +37,7 @@ class BaseModel(object):
         later in charge of performing requests to SWAPI for each of the
         pages while looping.
         """
-        pass
+        return BaseQuerySet()
 
 
 class People(BaseModel):
@@ -55,19 +64,50 @@ class Films(BaseModel):
 class BaseQuerySet(object):
 
     def __init__(self):
-        pass
+        self.current_page = 0
+        self.current_element = 0
+        self.objects = []
 
     def __iter__(self):
-        pass
+        return self.__class__()
 
     def __next__(self):
         """
         Must handle requests to next pages in SWAPI when objects in the current
         page were all consumed.
         """
-        pass
+        while True:
+            if self.current_element + 1 > len(self.objects):
+                # need to request a new page
+                try:
+                    self._request_next_page()
+                except SWAPIClientError:
+                    raise StopIteration()
+            elem = self.objects[self.current_element]
+            self.current_element += 1
+            return elem
 
     next = __next__
+    
+    def _request_next_page(self):
+        """
+        Requests next page of elements to the API based on the current state
+        of the iteration.
+        """
+        # increate the page counter to request the following page
+        self.current_page += 1
+    
+        # request next page in a generic way. Similar to what we did in BaseModel
+        method_name = 'get_{}'.format(self.RESOURCE_NAME)
+        method = getattr(api_client, method_name)
+        json_data = method(**{'page': self.current_page})
+    
+        # remember that each element in `self.objects` needs to be an instance
+        # of the proper Model class. For that we will instantiate the Model class
+        # (either People or Films) for each result in the new page.
+        Model = eval(self.RESOURCE_NAME.title())
+        for resource_data in json_data['results']:
+            self.objects.append(Model(resource_data))
 
     def count(self):
         """
@@ -75,7 +115,10 @@ class BaseQuerySet(object):
         If the counter is not persisted as a QuerySet instance attr,
         a new request is performed to the API in order to get it.
         """
-        pass
+        count = 0
+        for i in xrange(0, len(self.objects)):
+            count += 1
+        return count
 
 
 class PeopleQuerySet(BaseQuerySet):
